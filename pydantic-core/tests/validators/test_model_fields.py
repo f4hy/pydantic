@@ -1894,3 +1894,26 @@ def test_by_alias_and_name_config_interaction(
         assert s.validate_python({'my_alias': 1}, by_alias=runtime_by_alias, by_name=runtime_by_name).my_field == 1
     if name_allowed:
         assert s.validate_python({'my_field': 1}, by_alias=runtime_by_alias, by_name=runtime_by_name).my_field == 1
+
+
+@pytest.mark.parametrize('configured_extra', ['ignore', 'forbid', 'allow'])
+@pytest.mark.parametrize('override_extra', [None, 'ignore', 'forbid', 'allow'])
+def test_json_empty_extras_dict(configured_extra, override_extra):
+    validator = SchemaValidator(
+        core_schema.list_schema(
+            core_schema.model_fields_schema(
+                {'value': core_schema.model_field(core_schema.int_schema())},
+                extra_behavior=configured_extra,
+            )
+        )
+    )
+    first, second = validator.validate_json('[{"value": 1}, {"value": 2}]', extra=override_extra)
+    assert first[0] == {'value': 1}
+    assert second[0] == {'value': 2}
+    assert first[2] == second[2] == {'value'}
+    if (override_extra or configured_extra) == 'allow':
+        assert first[1] == second[1] == {}
+        first[1]['added'] = 3
+        assert second[1] == {}
+    else:
+        assert first[1] is second[1] is None
