@@ -270,10 +270,7 @@ impl ModelValidator {
             force_setattr(py, self_instance, intern!(py, DUNDER_FIELDS_SET_KEY), &fields_set)?;
             force_setattr(py, self_instance, root_field, &output)?;
         } else {
-            let output = self.validator.validate(py, input, state)?;
-
-            let (model_dict, model_extra, fields_set): (Bound<PyAny>, Bound<PyAny>, Bound<PyAny>) =
-                output.extract(py)?;
+            let (model_dict, model_extra, fields_set) = self.validate_fields(py, input, state)?;
             set_model_attrs(self_instance, &model_dict, &model_extra, &fields_set)?;
         }
         self.call_post_init(py, self_instance.clone(), input, state.extra())
@@ -316,15 +313,35 @@ impl ModelValidator {
             force_setattr(py, &instance, intern!(py, DUNDER_FIELDS_SET_KEY), &fields_set)?;
             force_setattr(py, &instance, root_field, output)?;
         } else {
-            let output = self.validator.validate(py, input, state)?;
+            let (model_dict, model_extra, val_fields_set) = self.validate_fields(py, input, state)?;
             instance = create_class(self.class.bind(py))?;
 
-            let (model_dict, model_extra, val_fields_set): (Bound<PyAny>, Bound<PyAny>, Bound<PyAny>) =
-                output.extract(py)?;
             let fields_set = existing_fields_set.unwrap_or(&val_fields_set);
             set_model_attrs(&instance, &model_dict, &model_extra, fields_set)?;
         }
         self.call_post_init(py, instance, input, state.extra())
+    }
+
+    /// Run the inner validator, returning the model's `__dict__`, `__pydantic_extra__` and `__pydantic_fields_set__`.
+    #[allow(clippy::type_complexity)]
+    fn validate_fields<'py>(
+        &self,
+        py: Python<'py>,
+        input: &(impl Input<'py> + ?Sized),
+        state: &mut ValidationState<'_, 'py>,
+    ) -> ValResult<(Bound<'py, PyAny>, Bound<'py, PyAny>, Bound<'py, PyAny>)> {
+        if let CombinedValidator::ModelFields(validator) = self.validator.as_ref() {
+            // fast path for the common case, avoids packing the result into a Python tuple and unpacking it again
+            let (model_dict, model_extra, fields_set) = validator.validate_fields(py, input, state)?;
+            let model_extra = match model_extra {
+                Some(model_extra) => model_extra.into_any(),
+                None => py.None().into_bound(py),
+            };
+            Ok((model_dict.into_any(), model_extra, fields_set.into_any()))
+        } else {
+            let output = self.validator.validate(py, input, state)?;
+            Ok(output.extract(py)?)
+        }
     }
 
     fn call_post_init<'py>(
