@@ -554,7 +554,6 @@ impl ModelFieldsValidator {
         let lookup_type = LookupType::from_bools(validate_by_alias, validate_by_name)?;
 
         let model_dict = PyDict::new(py);
-        let mut model_extra_dict_op: Option<Bound<PyDict>> = None;
         let mut field_results: Vec<Option<(LookupFieldInfo, &JsonValue)>> =
             (0..self.fields.len()).map(|_| None).collect();
         let mut errors: Vec<ValLineError> = Vec::new();
@@ -564,7 +563,8 @@ impl ModelFieldsValidator {
         let state = &mut state.scoped_set_data(Some(model_dict.clone()));
         let state = &mut state.scoped_clear_field_error();
 
-        let model_extra_dict = PyDict::new(py);
+        // Even with no extra keys, extra=allow requires an empty dictionary.
+        let model_extra_dict_op = matches!(extra_behavior, ExtraBehavior::Allow).then(|| PyDict::new(py));
         for (key, value) in &**json_object {
             let mut handled = false;
             let key = key.as_ref();
@@ -604,6 +604,7 @@ impl ModelFieldsValidator {
                 }
                 ExtraBehavior::Ignore => {}
                 ExtraBehavior::Allow => {
+                    let model_extra_dict = model_extra_dict_op.as_ref().expect("extra=allow creates a dictionary");
                     let py_key: Bound<'_, PyString> = new_py_string(py, key, state.cache_str());
                     if let Some(validator) = &self.extras_validator {
                         match validator.validate(py, value, state) {
@@ -688,10 +689,6 @@ impl ModelFieldsValidator {
             };
 
             model_dict.set_item(&field.name, field_value)?;
-        }
-
-        if matches!(extra_behavior, ExtraBehavior::Allow) {
-            model_extra_dict_op = Some(model_extra_dict);
         }
 
         if !errors.is_empty() {
