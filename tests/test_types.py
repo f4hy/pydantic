@@ -2200,6 +2200,30 @@ def test_json_value_with_subclassed_types():
     assert adapter.validate_python(valid_json_data) == valid_json_data
 
 
+def test_json_value_serialization() -> None:
+    class IntType(int):
+        pass
+
+    class ListType(list):
+        pass
+
+    class DictType(dict):
+        pass
+
+    adapter = TypeAdapter(JsonValue)
+    value = {'a': [1, 1.5, 'x', True, None, IntType(2)], 'b': DictType(c=ListType([{}]))}
+    expected = {'a': [1, 1.5, 'x', True, None, 2], 'b': {'c': [{}]}}
+
+    assert adapter.dump_python(value) == expected
+    assert adapter.dump_python(value, mode='json') == expected
+    assert json.loads(adapter.dump_json(value)) == expected
+    assert adapter.dump_python(value, include={'a': {0, 2}}) == {'a': [1, 'x']}
+
+    # `mode='json'` output is consistent with `dump_json()`:
+    assert adapter.dump_python([float('inf')], mode='json') == [None]
+    assert adapter.dump_json([float('inf')]) == b'[null]'
+
+
 def test_json_value_roundtrip() -> None:
     # see https://github.com/pydantic/pydantic/issues/8175
     class MyModel(BaseModel):
